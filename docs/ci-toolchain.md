@@ -5,7 +5,7 @@ infrastructure validation pipeline.
 
 | Tool | Version |
 |------|---------|
-| Python | 3.10.12 |
+| Python | 3.12 |
 | Terraform | 1.16.0 |
 | pre-commit | 4.3.0 |
 
