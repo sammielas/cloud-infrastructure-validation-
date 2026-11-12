@@ -1,0 +1,24 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+*.tfvars
+!*.tfvars.example
+
+# Local secrets
+.env
+.env.*
+!.env.example
+
+# Personal documentation
+PERSONAL_NOTES.md
+**/PERSONAL_NOTES.md
