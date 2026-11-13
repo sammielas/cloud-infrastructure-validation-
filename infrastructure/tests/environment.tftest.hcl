@@ -48,3 +48,12 @@ run "reject_production_environment" {
     var.environment
   ]
 }
+
+run "default_environment_is_dev" {
+  command = plan
+
+  assert {
+    condition     = output.environment == "dev"
+    error_message = "Default environment must be dev."
+  }
+}
