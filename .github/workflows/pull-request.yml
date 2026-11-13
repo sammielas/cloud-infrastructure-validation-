@@ -44,6 +44,10 @@ jobs:
         working-directory: infrastructure
         run: terraform validate
 
+      - name: Terraform native tests
+        working-directory: infrastructure
+        run: terraform test -no-color
+
       - name: Valid input plan
         working-directory: infrastructure
         run: |
