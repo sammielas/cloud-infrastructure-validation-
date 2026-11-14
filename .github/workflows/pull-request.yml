@@ -25,6 +25,7 @@ jobs:
         uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_version: "1.16.0"
+          terraform_wrapper: false
 
       - name: Install pre-commit
         run: python -m pip install -r requirements-ci.txt
@@ -44,15 +45,126 @@ jobs:
         working-directory: infrastructure
         run: terraform validate
 
-      - name: Terraform native tests
+
+  integration:
+    name: S3 Integration Tests
+    runs-on: ubuntu-latest
+
+    env:
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_DEFAULT_REGION: eu-west-2
+      FLOCI_S3_ENDPOINT: http://127.0.0.1:4566
+      TEST_S3_BUCKET: platform-artifacts-local-dev
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: "1.16.0"
+          terraform_wrapper: false
+
+      - name: Start Floci
+        run: |
+          docker run -d \
+            --name floci \
+            -p 127.0.0.1:4566:4566 \
+            floci/floci@sha256:b3b3a70a294b8ba8095385b8571ea1e4d44d494950d98de5e812cd9de02f506b
+
+      - name: Wait for Floci S3 API
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for attempt in $(seq 1 30); do
+            if aws \
+              --endpoint-url="$FLOCI_S3_ENDPOINT" \
+              s3api list-buckets \
+              --output json > /dev/null 2>&1; then
+              echo "Floci S3 API ready after $attempt attempt(s)"
+              exit 0
+            fi
+
+            echo "Waiting for Floci S3 API ($attempt/30)"
+            sleep 2
+          done
+
+          echo "Floci failed readiness check"
+          docker logs floci
+          exit 1
+
+      - name: Install Python test dependencies
+        run: python -m pip install -r requirements-test.txt
+
+      - name: Initialize Terraform
+        working-directory: infrastructure
+        run: terraform init -backend=false
+
+      - name: Run Terraform native tests
         working-directory: infrastructure
         run: terraform test -no-color
 
-      - name: Valid input plan
-        working-directory: infrastructure
-        run: |
-          terraform plan -input=false \
-            -var="environment=staging"
-
       - name: Reject invalid environment
         run: bash scripts/test-invalid-environment.sh
+
+      - name: Terraform plan
+        working-directory: infrastructure
+        run: |
+          terraform plan \
+            -input=false \
+            -out=tfplan \
+            -var="environment=dev"
+
+      - name: Apply infrastructure
+        working-directory: infrastructure
+        run: terraform apply -input=false -auto-approve tfplan
+
+      - name: Run Python integration tests
+        run: python -m pytest tests/integration -v
+
+      - name: Capture Floci logs on failure
+        if: failure()
+        run: docker logs floci || true
+
+      - name: Destroy infrastructure
+        if: always()
+        working-directory: infrastructure
+        shell: bash
+        run: |
+          if [ -f terraform.tfstate ] && [ -d .terraform ]; then
+            terraform destroy \
+              -input=false \
+              -auto-approve \
+              -var="environment=dev"
+          else
+            echo "No initialized Terraform state available for cleanup."
+          fi
+
+      - name: Verify Terraform cleanup
+        if: always()
+        working-directory: infrastructure
+        shell: bash
+        run: |
+          if [ -f terraform.tfstate ] && [ -d .terraform ]; then
+            remaining=$(terraform state list)
+
+            if [ -n "$remaining" ]; then
+              echo "Terraform still tracks resources:"
+              echo "$remaining"
+              exit 1
+            fi
+
+            echo "Terraform state contains no managed resources."
+          fi
+
+      - name: Stop emulator
+        if: always()
+        run: docker rm -f floci || true
