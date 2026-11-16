@@ -23,3 +23,10 @@ repos:
         language: system
         pass_filenames: false
         files: \.tf$
+
+      - id: terraform-tflint
+        name: Terraform linting
+        entry: bash scripts/run-tflint.sh
+        language: system
+        pass_filenames: false
+        files: (\.tf$|(^|/)\.tflint\.hcl$)

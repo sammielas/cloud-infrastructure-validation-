@@ -27,6 +27,17 @@ jobs:
           terraform_version: "1.16.0"
           terraform_wrapper: false
 
+      - name: Set up TFLint
+        uses: terraform-linters/setup-tflint@6e1e0642c0289bd619021bf6b34e3c08ed1e005a # v6
+        with:
+          tflint_version_file: .tflint-version
+          cache: true
+
+      - name: Initialize TFLint
+        run: tflint --init --config="$GITHUB_WORKSPACE/.tflint.hcl"
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
       - name: Install pre-commit
         run: python -m pip install -r requirements-test.txt
 
@@ -44,6 +55,9 @@ jobs:
       - name: Terraform validate
         working-directory: infrastructure
         run: terraform validate
+
+      - name: Terraform lint
+        run: bash scripts/run-tflint.sh
 
 
   integration:
