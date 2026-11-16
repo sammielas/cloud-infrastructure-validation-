@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if ! command -v tflint >/dev/null 2>&1; then
-  echo "ERROR: TFLint is not installed or is missing from PATH."
+  echo "ERROR: TFLint is not installed or is missing from PATH." >&2
   exit 1
 fi
 
