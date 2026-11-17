@@ -1,15 +1,10 @@
 resource "aws_s3_bucket" "application_artifacts" {
-  resource "aws_s3_bucket" "application_artifacts" {
-    #checkov:skip=CKV_AWS_144:Local Floci environment has no cross-region replication requirement; review before AWS deployment.
-    #checkov:skip=CKV2_AWS_61:Artifact retention policy is not yet defined; review before AWS deployment.
-    #checkov:skip=CKV_AWS_18:Access logging architecture is deferred for local emulator testing.
-    #checkov:skip=CKV2_AWS_62:No event notification consumer exists in the current architecture.
-    #checkov:skip=CKV_AWS_145:SSE-S3 AES256 is the approved local encryption baseline; KMS is deferred.
+  #checkov:skip=CKV_AWS_144:Local Floci environment has no cross-region replication requirement; review before AWS deployment.
+  #checkov:skip=CKV2_AWS_61:Artifact retention policy is not yet defined; review before AWS deployment.
+  #checkov:skip=CKV_AWS_18:Access logging architecture is deferred for local emulator testing.
+  #checkov:skip=CKV2_AWS_62:No event notification consumer exists in the current architecture.
+  #checkov:skip=CKV_AWS_145:SSE-S3 AES256 is the approved local encryption baseline; KMS is deferred.
 
-    bucket = "platform-artifacts-local-${var.environment}"
-
-    # Keep your existing tags and the rest of the file unchanged.
-  }
   bucket = "platform-artifacts-local-${var.environment}"
 
   tags = {
