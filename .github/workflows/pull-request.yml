@@ -21,6 +21,12 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install Checkov in isolated environment
+        run: |
+          python -m venv .venv-checkov
+          .venv-checkov/bin/python -m pip install \
+            -r requirements-security.txt
+
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
@@ -38,7 +44,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
-      - name: Install pre-commit
+      - name: Install quality and test dependencies
         run: python -m pip install -r requirements-test.txt
 
       - name: Run pre-commit hooks
@@ -58,6 +64,12 @@ jobs:
 
       - name: Terraform lint
         run: bash scripts/run-tflint.sh
+
+      - name: Terraform security scan
+        run: bash scripts/run-checkov.sh
+
+      - name: Security regression tests
+        run: python -m pytest tests/security -v
 
 
   integration:
