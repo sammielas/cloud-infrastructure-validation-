@@ -1,3 +1,4 @@
+
 name: Pull Request Validation
 
 on:
@@ -68,9 +69,12 @@ jobs:
       - name: Terraform security scan
         run: bash scripts/run-checkov.sh
 
-      - name: Security regression tests
-        run: python -m pytest tests/security -v
-
+      - name: Offline security regression tests
+        run: |
+          python -m pytest \
+            tests/security/test_checkov_public_access.py \
+            tests/security/test_cleanup.py \
+            -v
 
   integration:
     name: S3 Integration Tests
@@ -195,3 +199,129 @@ jobs:
       - name: Stop emulator
         if: always()
         run: docker rm -f floci || true
+
+  iam-security:
+    name: IAM Security Validation
+    runs-on: ubuntu-latest
+
+    env:
+      AWS_DEFAULT_REGION: eu-west-2
+      FLOCI_ENDPOINT: http://127.0.0.1:4567
+      FLOCI_ADMIN_ACCESS_KEY: floci
+      FLOCI_ADMIN_SECRET_KEY: floci
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Install Python test dependencies
+        run: python -m pip install -r requirements-test.txt
+
+      - name: Start security-enabled Floci
+        run: |
+          docker run -d \
+            --name floci-security \
+            -p 127.0.0.1:4567:4566 \
+            -e FLOCI_SERVICES_IAM_ENFORCEMENT_ENABLED=true \
+            -e FLOCI_SERVICES_S3_ENFORCE_AUTH=true \
+            -e FLOCI_SERVICES_IAM_SEED_DEPLOYER_PRINCIPAL=true \
+            floci/floci@sha256:b3b3a70a294b8ba8095385b8571ea1e4d44d494950d98de5e812cd9de02f506b
+
+      - name: Wait for security emulator readiness
+        id: readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for attempt in $(seq 1 30); do
+            if python - <<'PY'
+          import os
+          import sys
+
+          import boto3
+          from botocore.exceptions import BotoCoreError, ClientError
+
+          client = boto3.client(
+              "iam",
+              endpoint_url=os.environ["FLOCI_ENDPOINT"],
+              region_name=os.environ["AWS_DEFAULT_REGION"],
+              aws_access_key_id=os.environ["FLOCI_ADMIN_ACCESS_KEY"],
+              aws_secret_access_key=os.environ["FLOCI_ADMIN_SECRET_KEY"],
+              config=boto3.session.Config(
+                  connect_timeout=2,
+                  read_timeout=2,
+                  retries={"max_attempts": 1},
+              ),
+          )
+
+          try:
+              response = client.get_user(UserName="floci-deployer")
+              assert response["User"]["UserName"] == "floci-deployer"
+          except (BotoCoreError, ClientError, AssertionError):
+              sys.exit(1)
+          PY
+            then
+              echo "Security emulator ready after $attempt attempt(s)"
+              exit 0
+            fi
+
+            echo "Waiting for IAM API ($attempt/30)"
+            sleep 2
+          done
+
+          echo "Security emulator failed readiness check"
+          exit 1
+
+      - name: Run IAM enforcement tests
+        id: iam_tests
+        run: |
+          python -m pytest \
+            tests/security/test_floci_iam_enforcement.py \
+            -v
+
+      - name: Publish security validation summary
+        if: always()
+        shell: bash
+        env:
+          READINESS_RESULT: ${{ steps.readiness.outcome }}
+          IAM_TEST_RESULT: ${{ steps.iam_tests.outcome }}
+        run: |
+          {
+            echo "## Pull Request Security Validation"
+            echo
+            echo "| Control | Status |"
+            echo "|---|---|"
+
+            if [[ "$READINESS_RESULT" == "success" &&
+                  "$IAM_TEST_RESULT" == "success" ]]; then
+              echo "| Floci IAM enforcement | PASS |"
+            else
+              echo "| Floci IAM enforcement | FAILED / NOT COMPLETED |"
+            fi
+
+            echo "| AWS Organizations SCP enforcement | NOT VALIDATED |"
+            echo "| Real AWS IAM validation | NOT VALIDATED |"
+            echo "| AWS Config compliance | NOT VALIDATED |"
+            echo
+            echo "### Validation boundary"
+            echo
+            echo "Floci results demonstrate selected emulator IAM behaviours."
+            echo "They do not establish real AWS or SCP enforcement."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Capture security emulator logs on failure
+        if: failure()
+        run: docker logs floci-security || true
+
+      - name: Stop security emulator
+        if: always()
+        shell: bash
+        run: |
+          if docker container inspect floci-security > /dev/null 2>&1; then
+            docker rm -f floci-security
+          fi
