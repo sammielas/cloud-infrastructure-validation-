@@ -39,12 +39,19 @@ def plan_bundle(tmp_path):
 
 
 def run_validator(
-    plan, metadata, digest, commit=VALID_COMMIT, version=TERRAFORM_VERSION
+    plan,
+    metadata,
+    digest,
+    commit=VALID_COMMIT,
+    version=TERRAFORM_VERSION,
+    artifact_dir=None,
 ):
     return subprocess.run(
         [
             sys.executable,
             str(VALIDATOR),
+            "--artifact-dir",
+            str(artifact_dir if artifact_dir is not None else metadata.parent),
             "--plan",
             str(plan),
             "--metadata",
@@ -106,7 +113,7 @@ def test_missing_plan_is_rejected(plan_bundle):
     result = run_validator(plan, metadata, digest)
 
     assert result.returncode != 0
-    assert "does not exist" in result.stderr
+    assert "Cannot safely read expected artifact" in result.stderr
 
 
 def test_modified_metadata_digest_is_rejected(plan_bundle):
@@ -119,3 +126,109 @@ def test_modified_metadata_digest_is_rejected(plan_bundle):
 
     assert result.returncode != 0
     assert "Metadata digest does not match" in result.stderr
+
+
+def test_plan_path_traversal_is_rejected(plan_bundle, tmp_path):
+    plan, metadata, digest = plan_bundle
+
+    outside = tmp_path.parent / "outside" / "tfplan"
+    result = run_validator(outside, metadata, digest, artifact_dir=tmp_path)
+
+    assert result.returncode != 0
+    assert "outside the trusted directory" in result.stderr
+
+
+def test_metadata_path_traversal_is_rejected(plan_bundle, tmp_path):
+    plan, metadata, digest = plan_bundle
+
+    outside = tmp_path.parent / "outside" / "tfplan.metadata.json"
+    result = run_validator(plan, outside, digest, artifact_dir=tmp_path)
+
+    assert result.returncode != 0
+    assert "outside the trusted directory" in result.stderr
+
+
+def test_plan_symlink_is_rejected(plan_bundle, tmp_path):
+    plan, metadata, digest = plan_bundle
+
+    outside = tmp_path / "outside-plan"
+    outside.write_bytes(plan.read_bytes())
+
+    plan.unlink()
+    plan.symlink_to(outside)
+
+    result = run_validator(plan, metadata, digest)
+
+    assert result.returncode != 0
+    assert "symlinks are not permitted" in result.stderr
+
+
+def test_metadata_symlink_is_rejected(plan_bundle, tmp_path):
+    plan, metadata, digest = plan_bundle
+
+    outside = tmp_path / "outside-metadata.json"
+    outside.write_bytes(metadata.read_bytes())
+
+    metadata.unlink()
+    metadata.symlink_to(outside)
+
+    result = run_validator(plan, metadata, digest)
+
+    assert result.returncode != 0
+    assert "symlinks are not permitted" in result.stderr
+
+
+def test_relative_plan_traversal_is_rejected(plan_bundle, tmp_path):
+    plan, metadata, digest = plan_bundle
+
+    result = run_validator(
+        Path("..") / "outside" / "tfplan",
+        metadata,
+        digest,
+        artifact_dir=tmp_path,
+    )
+
+    assert result.returncode != 0
+    assert "outside the trusted directory" in result.stderr
+
+
+def test_unexpected_plan_filename_is_rejected(plan_bundle):
+    plan, metadata, digest = plan_bundle
+
+    result = run_validator(
+        plan.with_name("unexpected.tfplan"),
+        metadata,
+        digest,
+    )
+
+    assert result.returncode != 0
+    assert "Unexpected artifact filename" in result.stderr
+
+
+def test_symlinked_artifact_directory_is_rejected(plan_bundle, tmp_path):
+    plan, metadata, digest = plan_bundle
+
+    linked_dir = tmp_path.parent / f"{tmp_path.name}-link"
+    linked_dir.symlink_to(tmp_path, target_is_directory=True)
+
+    result = run_validator(
+        plan,
+        metadata,
+        digest,
+        artifact_dir=linked_dir,
+    )
+
+    assert result.returncode != 0
+    assert "Trusted artifact directory is invalid" in result.stderr
+
+
+def test_non_regular_plan_is_rejected(plan_bundle):
+    plan, metadata, digest = plan_bundle
+
+    plan.unlink()
+    plan.mkdir()
+
+    result = run_validator(plan, metadata, digest)
+
+    assert result.returncode != 0
+    assert "Artifact is not a regular file" in result.stderr
