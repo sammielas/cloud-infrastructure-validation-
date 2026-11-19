@@ -15,6 +15,7 @@ COMMIT_PATTERN = re.compile(r"[0-9a-f]{40}\Z")
 
 PLAN_FILENAME = "tfplan"
 METADATA_FILENAME = "tfplan.metadata.json"
+INVALID_ARTIFACT_DIRECTORY_MESSAGE = "Trusted artifact directory is invalid"
 
 MAX_METADATA_BYTES = 64 * 1024
 HASH_CHUNK_BYTES = 1024 * 1024
@@ -114,7 +115,7 @@ def validate_saved_plan(
         raise PlanValidationError("Expected digest must be a SHA-256 hex value")
 
     if artifact_dir.is_symlink():
-        raise PlanValidationError("Trusted artifact directory is invalid")
+        raise PlanValidationError(INVALID_ARTIFACT_DIRECTORY_MESSAGE)
 
     try:
         trusted_dir = artifact_dir.resolve(strict=True)
@@ -124,11 +125,11 @@ def validate_saved_plan(
             os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
         )
     except OSError as exc:
-        raise PlanValidationError("Trusted artifact directory is invalid") from exc
+        raise PlanValidationError(INVALID_ARTIFACT_DIRECTORY_MESSAGE) from exc
 
     try:
         if not stat.S_ISDIR(os.fstat(directory_fd).st_mode):
-            raise PlanValidationError("Trusted artifact directory is invalid")
+            raise PlanValidationError(INVALID_ARTIFACT_DIRECTORY_MESSAGE)
 
         validate_artifact_path(plan_path, trusted_dir, PLAN_FILENAME)
         validate_artifact_path(metadata_path, trusted_dir, METADATA_FILENAME)
