@@ -23,3 +23,7 @@ crash.log
 # Personal documentation
 PERSONAL_NOTES.md
 **/PERSONAL_NOTES.md
+
+# PLAT-147: Local Terraform plan artifacts
+/infrastructure/tfplan
+/infrastructure/tfplan.metadata.json
