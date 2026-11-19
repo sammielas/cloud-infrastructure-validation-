@@ -24,6 +24,12 @@ class ProvenanceValidationError(Exception):
     """The plan provenance contract was not satisfied."""
 
 
+def _validate_positive_run_number(value: str, label: str) -> None:
+    """Validate an authorized GitHub Actions run identifier."""
+    if not value.isascii() or not value.isdecimal() or int(value) < 1:
+        raise ProvenanceValidationError(f"Invalid authorized {label}")
+
+
 def validate_provenance(
     record: dict,
     *,
@@ -46,12 +52,8 @@ def validate_provenance(
     if not DIGEST_PATTERN.fullmatch(expected_digest):
         raise ProvenanceValidationError("Invalid trusted digest")
 
-    for value, label in (
-        (authorized_run_id, "run ID"),
-        (authorized_run_attempt, "run attempt"),
-    ):
-        if not value.isascii() or not value.isdecimal() or int(value) < 1:
-            raise ProvenanceValidationError(f"Invalid authorized {label}")
+    _validate_positive_run_number(authorized_run_id, "run ID")
+    _validate_positive_run_number(authorized_run_attempt, "run attempt")
 
     if not expected_version:
         raise ProvenanceValidationError("Missing expected Terraform version")
