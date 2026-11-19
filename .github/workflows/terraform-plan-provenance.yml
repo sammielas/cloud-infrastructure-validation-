@@ -1,0 +1,124 @@
+name: Terraform Plan Provenance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  produce-plan:
+    name: Produce Attested Terraform Plan
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+
+    steps:
+      - name: Checkout trusted source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: "1.16.0"
+          terraform_wrapper: false
+
+      - name: Create isolated Terraform fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p "$RUNNER_TEMP/plan-workspace"
+
+          cat > "$RUNNER_TEMP/plan-workspace/main.tf" <<'EOF'
+          terraform {
+            required_version = "= 1.16.0"
+          }
+
+          resource "terraform_data" "handoff_fixture" {
+            input = "authenticated-plan-handoff"
+          }
+          EOF
+
+      - name: Generate saved plan
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "$RUNNER_TEMP/plan-workspace"
+
+          terraform init -backend=false -input=false
+          terraform validate
+          terraform plan -input=false -out=tfplan
+
+      - name: Create plan metadata
+        shell: bash
+        env:
+          SOURCE_COMMIT: ${{ github.sha }}
+          PRODUCER_RUN_ID: ${{ github.run_id }}
+          PRODUCER_RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          workspace = Path(os.environ["RUNNER_TEMP"]) / "plan-workspace"
+          plan = workspace / "tfplan"
+
+          with plan.open("rb") as plan_file:
+              digest = hashlib.file_digest(
+                  plan_file, "sha256"
+              ).hexdigest()
+
+          record = {
+              "source_commit": os.environ["SOURCE_COMMIT"],
+              "workflow_run_id": os.environ["PRODUCER_RUN_ID"],
+              "workflow_run_attempt": os.environ["PRODUCER_RUN_ATTEMPT"],
+              "terraform_version": "1.16.0",
+              "plan_sha256": digest,
+          }
+
+          (workspace / "tfplan.provenance.json").write_text(
+              json.dumps(record, indent=2) + "\n",
+              encoding="utf-8",
+          )
+
+          (workspace / "tfplan.metadata.json").write_text(
+              json.dumps(
+                  {
+                      "commit_sha": record["source_commit"],
+                      "terraform_version": record["terraform_version"],
+                      "plan_sha256": digest,
+                  },
+                  indent=2,
+              ) + "\n",
+              encoding="utf-8",
+          )
+
+          print("Plan digest:", digest)
+          PY
+
+      - name: Attest plan provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: ${{ runner.temp }}/plan-workspace/tfplan
+
+      - name: Upload plan artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: terraform-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/plan-workspace/tfplan
+            ${{ runner.temp }}/plan-workspace/tfplan.metadata.json
+            ${{ runner.temp }}/plan-workspace/tfplan.provenance.json
+          if-no-files-found: error
+          retention-days: 7

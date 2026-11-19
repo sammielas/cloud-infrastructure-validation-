@@ -364,9 +364,11 @@ jobs:
             --require-hashes \
             -r requirements-test.lock
 
-      - name: Run saved-plan validation tests
+
+      - name: Run saved-plan and provenance security tests
         run: |
           python -m pytest \
             tests/unit/test_validate_saved_plan.py \
+            tests/unit/test_validate_plan_provenance.py \
             tests/integration/test_terraform_stale_plan.py \
             -v
