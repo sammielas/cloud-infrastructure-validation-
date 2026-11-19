@@ -178,3 +178,63 @@ def test_cli_rejects_oversized_record(tmp_path):
 
     assert result.returncode != 0
     assert "Provenance record too large" in result.stderr
+
+
+def test_rejects_substituted_provenance_record(valid_record):
+    """A record from a different plan run must not be accepted."""
+    attacker_record = {
+        **valid_record,
+        "source_commit": COMMIT_B,
+        "workflow_run_id": "999999999",
+        "workflow_run_attempt": "2",
+        "plan_sha256": "d" * 64,
+    }
+
+    with pytest.raises(
+        ProvenanceValidationError,
+        match="Unauthorized source commit",
+    ):
+        verify(attacker_record)
+
+
+def test_rejects_producer_identity_replaced_by_apply_identity(valid_record):
+    """The apply run ID must not replace the authorized producer run ID."""
+    apply_run_id = "200"
+
+    attacker_record = {
+        **valid_record,
+        "workflow_run_id": apply_run_id,
+    }
+
+    with pytest.raises(
+        ProvenanceValidationError,
+        match="Unauthorized workflow run",
+    ):
+        verify(attacker_record)
+
+
+def test_matching_attacker_controlled_expectations_are_not_authorization(
+    valid_record,
+):
+    """Demonstrate the trust boundary, not a verifier implementation bug."""
+    attacker_record = {
+        **valid_record,
+        "source_commit": COMMIT_B,
+        "workflow_run_id": "999999999",
+        "workflow_run_attempt": "2",
+        "plan_sha256": "d" * 64,
+    }
+
+    # A deliberately unsafe caller obtains every expected value
+    # from the same attacker-controlled record.
+    #
+    # The verifier cannot distinguish these self-consistent values
+    # from authentic authorization.
+    validate_provenance(
+        attacker_record,
+        authorized_commit=attacker_record["source_commit"],
+        authorized_run_id=attacker_record["workflow_run_id"],
+        authorized_run_attempt=attacker_record["workflow_run_attempt"],
+        expected_version=attacker_record["terraform_version"],
+        expected_digest=attacker_record["plan_sha256"],
+    )
